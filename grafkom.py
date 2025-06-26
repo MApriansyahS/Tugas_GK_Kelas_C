@@ -61,7 +61,7 @@ class Shape:
             dx, dy = x - cx, y - cy
             new_x = dx * math.cos(angle) - dy * math.sin(angle) + cx
             new_y = dx * math.sin(angle) + dy * math.cos(angle) + cy
-            new_points.append((new_x, new_y))
+            new_points.append((round(new_x), round(new_y)))  # <-- bulatkan ke integer
         self.points = new_points
 
 class MiniPaint:
@@ -147,7 +147,8 @@ class MiniPaint:
 
         tk.Button(frame, text="Shape", command=self.choose_shape_type).pack(side=tk.LEFT, padx=2)
         tk.Button(frame, text="Line", command=self.choose_line_type).pack(side=tk.LEFT, padx=2)
-        tk.Button(frame, text="Fill", command=self.choose_fill_color).pack(side=tk.LEFT, padx=2)  # Tambahkan ini
+        tk.Button(frame, text="Fill", command=self.choose_fill_color).pack(side=tk.LEFT, padx=2)
+        tk.Button(frame, text="Select", command=lambda: self.set_mode("select")).pack(side=tk.LEFT, padx=2)  # <--- Tambahkan ini
         
         self.rotate_ccw_btn = tk.Button(frame, text="⟲", command=lambda: self.rotate_selected(-15), state=tk.DISABLED)
         self.rotate_ccw_btn.pack(side=tk.LEFT, padx=2)
@@ -205,12 +206,10 @@ class MiniPaint:
             # Cek apakah klik di dalam shape
             for shape in reversed(self.shapes):
                 if shape.is_clicked(event.x, event.y):
-                    # Lakukan flood fill pada titik klik
+                    self.save_undo()  # Panggil sebelum fill!
                     self.flood_fill(event.x, event.y, self.fill_color)
                     self.refresh_canvas()
-                    self.save_undo()
                     return
-            # Jika tidak ada shape yang diklik, tidak melakukan apa-apa
             messagebox.showinfo("Info", "Klik di dalam shape untuk mengisi warna.")
         elif self.mode == "select":
             self.select_shape(event.x, event.y)
@@ -283,6 +282,7 @@ class MiniPaint:
 
         shape = Shape(self.mode, pts, self.pen_color, self.pen_width)
         self.shapes.append(shape)
+        self.draw_shape_on_image(shape)  # Tambahkan ini!
         self.redraw_all()
         self.save_undo()
 
@@ -417,23 +417,29 @@ class MiniPaint:
         self.canvas.itemconfig(self.canvas_image, image=self.tk_image)
 
     def save_undo(self):
-        # Simpan state shapes untuk undo
+        # Simpan state shapes dan image untuk undo
         import copy
-        self.undo_stack.append(copy.deepcopy(self.shapes))
+        shapes_copy = copy.deepcopy(self.shapes)
+        image_copy = self.image.copy()
+        self.undo_stack.append((shapes_copy, image_copy))
         self.redo_stack.clear()
 
     def undo(self):
         if self.undo_stack:
-            self.redo_stack.append(self.shapes)
-            self.shapes = self.undo_stack.pop()
+            self.redo_stack.append((self.shapes, self.image))
+            self.shapes, self.image = self.undo_stack.pop()
+            self.draw_image = ImageDraw.Draw(self.image)
+            self.refresh_canvas()
             self.redraw_all()
         else:
             messagebox.showinfo("Info", "Tidak ada aksi untuk di-undo.")
 
     def redo(self):
         if self.redo_stack:
-            self.undo_stack.append(self.shapes)
-            self.shapes = self.redo_stack.pop()
+            self.undo_stack.append((self.shapes, self.image))
+            self.shapes, self.image = self.redo_stack.pop()
+            self.draw_image = ImageDraw.Draw(self.image)
+            self.refresh_canvas()
             self.redraw_all()
         else:
             messagebox.showinfo("Info", "Tidak ada aksi untuk di-redo.")
@@ -583,6 +589,19 @@ class MiniPaint:
                     q.extend([(cx+1, cy), (cx-1, cy), (cx, cy+1), (cx, cy-1)])
         except Exception as e:
             messagebox.showerror("Error", f"Flood fill gagal: {e}")
+
+
+    def draw_shape_on_image(self, shape):
+        # Gambar shape ke self.image menggunakan PIL
+        if shape.type == "rect":
+            self.draw_image.rectangle(shape.points, outline=shape.color, width=shape.width)
+        elif shape.type == "oval" or shape.type == "ellipse":
+            self.draw_image.ellipse(shape.points, outline=shape.color, width=shape.width)
+        elif shape.type in ["triangle", "star", "hexagon", "pentagon", "parallelogram", "trapezoid", "rhombus"]:
+            self.draw_image.polygon(shape.points, outline=shape.color, width=shape.width)
+        elif shape.type == "line":
+            self.draw_image.line(shape.points, fill=shape.color, width=shape.width)
+        # Untuk text, abaikan (tidak perlu diisi)
 
 
 if __name__ == "__main__":
